@@ -50,10 +50,14 @@ class CharacterSwapService:
         return self.providers[job.provider]
 
     def create_job(self, key: str, provider: str, request: CharacterEditRequest,
-                   estimated_units: int) -> Job:
+                   estimated_units: int, *, owner_id: str | None = None) -> Job:
         if provider not in self.providers or provider not in self.models:
             raise SafetyError("Unknown Character Swap provider")
-        return self.store.create(key, provider, self.models[provider], request, estimated_units)
+        return self.store.create(key, provider, self.models[provider], request, estimated_units, owner_id=owner_id)
+
+    def get_owned_job(self, job_id: str, owner_id: str) -> Job:
+        """HTTP-facing lookup; callers must obtain owner_id from a signed session."""
+        return self.store.get_owned(job_id, owner_id)
 
     def get_job(self, job_id: str) -> Job:
         """Resume local metadata without calling a provider, even in demo mode."""

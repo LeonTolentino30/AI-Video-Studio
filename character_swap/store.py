@@ -8,6 +8,7 @@ remain counted even after failure: this foundation never assumes a refund.
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import json
+import re
 from pathlib import Path
 import sqlite3
 import uuid
@@ -35,6 +36,7 @@ class Job:
     error_message: str | None
     video_url: str | None
     revision: int
+    owner_id: str | None = None
 
 
 class JobStore:
@@ -63,6 +65,9 @@ class JobStore:
                     revision INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(character_swap_jobs)")}
+            if "owner_id" not in columns:
+                connection.execute("ALTER TABLE character_swap_jobs ADD COLUMN owner_id TEXT")
 
     @contextmanager
     def _transaction(self):
@@ -102,8 +107,25 @@ class JobStore:
         finally:
             connection.close()
 
+    def get_owned(self, job_id: str, owner_id: str) -> Job:
+        """Never claim legacy rows or disclose another session's job."""
+        if not isinstance(owner_id, str) or not re.fullmatch(r"[0-9a-f]{64}", owner_id):
+            raise SafetyError("Character Swap job not found")
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        try:
+            return self._job(connection.execute(
+                "SELECT * FROM character_swap_jobs WHERE id = ? AND owner_id = ?",
+                (job_id, owner_id),
+            ).fetchone())
+        finally:
+            connection.close()
+
     def create(self, key: str, provider: str, model: str,
-               request: CharacterEditRequest, estimated_units: int) -> Job:
+               request: CharacterEditRequest, estimated_units: int, *, owner_id: str | None = None) -> Job:
+        # None preserves trusted offline callers; ownerless jobs are never public.
+        if owner_id is not None and (not isinstance(owner_id, str) or not re.fullmatch(r"[0-9a-f]{64}", owner_id)):
+            raise SafetyError("Invalid job owner")
         if not all(isinstance(value, str) and value.strip() for value in (key, provider, model)):
             raise SafetyError("Idempotency key, provider, and model are required")
         if type(estimated_units) is not int or not 0 < estimated_units <= 2**63 - 1:
@@ -114,17 +136,17 @@ class JobStore:
                 "SELECT * FROM character_swap_jobs WHERE idempotency_key = ?", (key,)
             ).fetchone()
             if row:
-                if (row["provider"], row["model"], row["request_json"], row["estimated_units"]) != (
-                    provider, model, encoded, estimated_units
+                if (row["provider"], row["model"], row["request_json"], row["estimated_units"], row["owner_id"]) != (
+                    provider, model, encoded, estimated_units, owner_id
                 ):
                     raise SafetyError("Idempotency key already belongs to a different request")
                 return self._job(row)
             job_id = uuid.uuid4().hex
             connection.execute("""
                 INSERT INTO character_swap_jobs
-                    (id, idempotency_key, provider, model, request_json, status, estimated_units)
-                VALUES (?, ?, ?, ?, ?, 'created', ?)
-            """, (job_id, key, provider, model, encoded, estimated_units))
+                    (id, idempotency_key, provider, model, request_json, status, estimated_units, owner_id)
+                VALUES (?, ?, ?, ?, ?, 'created', ?, ?)
+            """, (job_id, key, provider, model, encoded, estimated_units, owner_id))
             return self._job(connection.execute(
                 "SELECT * FROM character_swap_jobs WHERE id = ?", (job_id,)
             ).fetchone())
