@@ -3,6 +3,10 @@
 
 ## 📱 Application Preview
 
+https://github.com/user-attachments/assets/9a371e2a-55a0-450b-beba-9c934ba7a077
+
+
+
 ![AI Video Studio Interface](screenshots/app-preview.png)
 
 
