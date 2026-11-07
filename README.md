@@ -3,7 +3,7 @@
 
 ## 📱 Application Preview
 
-![AI Video Studio Interface](screenshots/app-preview2.png)
+![AI Video Studio Interface](screenshots/app-preview.png)
 
 
 ### AI-Powered Text-to-Video Generation Platform
