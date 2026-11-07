@@ -1,5 +1,11 @@
 # 🎬 AI Video Studio
 
+
+## 📱 Application Preview
+
+![AI Video Studio Interface](screenshots/app-preview2.png)
+
+
 ### AI-Powered Text-to-Video Generation Platform
 
 **AI Video Studio** is a full-stack web application that transforms natural-language prompts into AI-generated videos using the Runway API.
