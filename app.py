@@ -1,15 +1,31 @@
 import os
 import sqlite3
+from pathlib import Path
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
 from runwayml import RunwayML
+from werkzeug.utils import secure_filename
+import cv2
+
+
 
 
 load_dotenv()
 
+
 MOCK_MODE = os.getenv("MOCK_MODE", "true").lower() == "true"
 
 app = Flask(__name__)
+
+# Character Swap upload settings
+UPLOAD_FOLDER = Path("uploads")
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
+
+ALLOWED_VIDEO_EXTENSIONS = {".mp4"}
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
 
 @app.route("/config", methods=["GET"])
 def get_config():
@@ -50,12 +66,233 @@ client = RunwayML(api_key=api_key)
 
 
 @app.route("/")
+
 def home():
     return render_template("index.html")
 
 
+@app.route("/character-swap")
+def character_swap():
+    return render_template("character_swap.html")
+
+
+@app.route("/character-swap/upload", methods=["POST"])
+def upload_character_swap():
+    import uuid
+
+    if "video" not in request.files or "photo" not in request.files:
+        return jsonify({"error": "Upload a video and reference photo"}), 400
+
+    
+    video = request.files["video"]
+    photo = request.files["photo"]
+    prompt = request.form.get("prompt", "").strip()
+
+    if not video.filename or not photo.filename:
+        return jsonify({"error": "Both files are required"}), 400
+
+    if not prompt:
+        return jsonify({"error": "Please describe the video edit"}), 400
+
+    if len(prompt) > 1000:
+        return jsonify({"error": "Prompt must be 1000 characters or less"}), 400
+
+
+    video_extension = Path(secure_filename(video.filename)).suffix.lower()
+    photo_extension = Path(secure_filename(photo.filename)).suffix.lower()
+
+    if video_extension not in ALLOWED_VIDEO_EXTENSIONS:
+        return jsonify({"error": "Video must be MP4"}), 400
+
+    if photo_extension not in ALLOWED_IMAGE_EXTENSIONS:
+        return jsonify({"error": "Photo must be JPG or PNG"}), 400
+
+    upload_id = uuid.uuid4().hex
+
+    video_path = UPLOAD_FOLDER / f"{upload_id}_video{video_extension}"
+    photo_path = UPLOAD_FOLDER / f"{upload_id}_photo{photo_extension}"
+
+   
+    try:
+        video.save(video_path)
+        photo.save(photo_path)
+
+        capture = cv2.VideoCapture(str(video_path))
+
+        try:
+            if not capture.isOpened():
+                raise ValueError("Unable to read the uploaded video")
+
+            fps = capture.get(cv2.CAP_PROP_FPS)
+            frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT)
+
+            if fps <= 0 or frame_count <= 0:
+                raise ValueError("Unable to determine video duration")
+
+            duration = frame_count / fps
+
+            if duration < 2 or duration > 30:
+                raise ValueError(
+                    "Video must be between 2 and 30 seconds"
+                )
+        finally:
+            capture.release()
+
+    except (OSError, ValueError) as error:
+        video_path.unlink(missing_ok=True)
+        photo_path.unlink(missing_ok=True)
+
+        return jsonify({"error": str(error)}), 400
+
+   
+    
+    
+    return jsonify({
+        "message": "Files uploaded successfully",
+        "upload_id": upload_id,
+        "duration": round(duration, 2),
+        "prompt": prompt,
+        "status": "ready",
+        "video_filename": video_path.name,
+        "photo_filename": photo_path.name
+    }), 201
+
+
+@app.route("/character-swap/prepare", methods=["POST"])
+def prepare_character_swap():
+    import re
+
+    data = request.get_json(silent=True) or {}
+    upload_id = data.get("upload_id", "")
+
+    if not isinstance(upload_id, str) or not re.fullmatch(
+        r"[0-9a-f]{32}", upload_id
+    ):
+        return jsonify({"error": "Invalid upload ID"}), 400
+
+    videos = list(UPLOAD_FOLDER.glob(f"{upload_id}_video.mp4"))
+    photos = [
+        path for extension in (".jpg", ".jpeg", ".png")
+        for path in UPLOAD_FOLDER.glob(f"{upload_id}_photo{extension}")
+    ]
+
+    if len(videos) != 1 or len(photos) != 1:
+        return jsonify({"error": "Uploaded files not found"}), 404
+
+    try:
+        video_upload = client.uploads.create_ephemeral(file=videos[0])
+        photo_upload = client.uploads.create_ephemeral(file=photos[0])
+
+        return jsonify({
+            "message": "Files prepared for Runway",
+            "video_uri": video_upload.uri,
+            "photo_uri": photo_upload.uri,
+            "status": "prepared"
+        })
+
+
+    except Exception:
+        app.logger.exception("Runway asset upload failed")
+        return jsonify({
+            "error": "Unable to upload assets to Runway"
+        }), 502
+
+
+
+
+
+@app.route("/character-swap/generate", methods=["POST"])
+def generate_character_swap():
+    if MOCK_MODE:
+        return jsonify({
+            "error": "Real Character Swap generation is disabled in demo mode. No generation request was sent.",
+            "mode": "demo"
+        }), 403
+
+    data = request.get_json(silent=True) or {}
+
+    video_uri = data.get("video_uri")
+    photo_uri = data.get("photo_uri")
+    prompt = data.get("prompt", "")
+
+    if not all([
+        isinstance(video_uri, str) and video_uri.startswith("runway://"),
+        isinstance(photo_uri, str) and photo_uri.startswith("runway://"),
+        isinstance(prompt, str) and prompt.strip()
+    ]):
+        return jsonify({"error": "Missing or invalid generation inputs"}), 400
+
+    if len(prompt) > 1000:
+        return jsonify({"error": "Prompt is too long"}), 400
+
+    try:
+        task = client.video_to_video.create(
+            model="kling_4",
+            video_uri=video_uri,
+            prompt_text=prompt,
+            references=[
+                {"uri": photo_uri}
+            ],
+            ratio="auto_720p"
+        )
+
+        return jsonify({
+            "task_id": task.id,
+            "status": "submitted",
+            "model": "kling_4"
+        }), 202
+
+    except Exception:
+        app.logger.exception("Character Swap generation failed")
+        return jsonify({
+            "error": "Unable to start Character Swap generation"
+        }), 502
+
+
+
+@app.route("/character-swap/status/<task_id>", methods=["GET"])
+def check_character_swap_status(task_id):
+    try:
+        task = client.tasks.retrieve(task_id)
+
+        result = {
+            "task_id": task.id,
+            "status": task.status
+        }
+
+        if task.status == "SUCCEEDED":
+            result["video_url"] = (
+                task.output[0] if task.output else None
+            )
+
+        
+        elif task.status == "FAILED":
+            result["error"] = "Character Swap generation failed"
+            result["failure_code"] = getattr(
+                task, "failure_code", None
+            )
+            result["failure"] = getattr(
+                task, "failure", None
+            )
+            result["failure_details"] = getattr(
+                task, "failure_details", None
+            )
+
+
+        return jsonify(result)
+
+    except Exception:
+        app.logger.exception("Character Swap status check failed")
+
+        return jsonify({
+            "error": "Unable to check Character Swap status"
+        }), 502
+
+
 @app.route("/generate", methods=["POST"])
 def generate_video():
+
+
     data = request.get_json(silent=True) or {}
     prompt = data.get("prompt", "")
 

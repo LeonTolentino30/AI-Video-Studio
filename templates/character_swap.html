@@ -1,0 +1,254 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Character Swap | AI Video Studio</title>
+    <style>
+        body {
+            background: #101018;
+            color: white;
+            font-family: Arial, sans-serif;
+            max-width: 750px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #a78bfa;
+        }
+
+        .panel {
+            background: #1e1e2e;
+            padding: 25px;
+            border-radius: 14px;
+        }
+
+        label {
+            display: block;
+            margin-top: 20px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        input, textarea, button {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        input, textarea {
+            background: #29293d;
+            color: white;
+            border: 1px solid #555;
+        }
+
+        button {
+            margin-top: 25px;
+            background: #8b5cf6;
+            color: white;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #7c3aed;
+        }
+
+        .note {
+            color: #aaa;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 AI Character Swap</h1>
+    <p>Replace a character in your video using AI.</p>
+
+    <div class="panel">
+        <form id="swapForm">
+            <label for="video">1. Upload Original Video</label>
+            <input
+                type="file"
+                id="video"
+                accept="video/mp4"
+                required
+            >
+            <p class="note">MP4 video, up to 30 seconds.</p>
+
+            <label for="photo">2. Upload Reference Photo</label>
+            <input
+                type="file"
+                id="photo"
+                accept="image/png,image/jpeg"
+                required
+            >
+
+            <label for="prompt">3. Describe the Edit</label>
+            <textarea id="prompt" rows="4">Replace the main performer with the person in the reference image. Preserve the original camera movement, background, and choreography.</textarea>
+
+            <button type="submit">Generate Character Swap</button>
+        </form>
+
+        <p id="status" aria-live="polite"></p>
+    </div>
+
+    
+    <script>
+        document.getElementById("swapForm")
+            .addEventListener("submit", async function(event) {
+                event.preventDefault();
+
+                const status = document.getElementById("status");
+                
+                const video = document.getElementById("video").files[0];
+                const photo = document.getElementById("photo").files[0];
+                const prompt = document.getElementById("prompt").value;
+
+
+                if (!video || !photo) {
+                    status.textContent = "Please select both files.";
+                    return;
+                }
+
+                
+                const formData = new FormData();
+                formData.append("video", video);
+                formData.append("photo", photo);
+                formData.append("prompt", prompt);
+
+
+                status.textContent = "Uploading files...";
+
+                try {
+                    const response = await fetch("/character-swap/upload", {
+                        method: "POST",
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(result.error || "Upload failed");
+                    }
+
+                    
+                    status.textContent = "Uploading files to Runway...";
+
+                    const prepareResponse = await fetch("/character-swap/prepare", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            upload_id: result.upload_id
+                        })
+                    });
+
+                    const prepared = await prepareResponse.json();
+
+                    if (!prepareResponse.ok) {
+                        throw new Error(prepared.error || "Runway upload failed");
+                    }
+
+                    
+                    status.textContent =
+                        "Video and photo uploaded to Runway. Ready to generate.";
+
+                    const confirmed = window.confirm(
+                        "Start AI Character Swap?\n\n" +
+                        "This will submit a paid Kling 4 generation request " +
+                        "and consume Runway credits.\n\n" +
+                        "Press OK to generate or Cancel to stop."
+                    );
+
+                    if (!confirmed) {
+                        status.textContent =
+                            "Generation canceled. No AI generation request was sent.";
+                        return;
+                    }
+
+                    
+                    status.textContent = "Starting AI character replacement...";
+
+                    try {
+                        const generateResponse = await fetch("/character-swap/generate", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                video_uri: prepared.video_uri,
+                                photo_uri: prepared.photo_uri,
+                                prompt: prompt
+                            })
+                        });
+
+                        const generation = await generateResponse.json();
+
+                        if (!generateResponse.ok) {
+                            throw new Error(
+                                generation.error || "AI generation failed to start"
+                            );
+                        }
+
+                        status.textContent =
+                            "AI generation started! Task ID: " + generation.task_id;
+
+                        const videoResult = document.createElement("video");
+                        videoResult.controls = true;
+                        videoResult.style.width = "100%";
+                        videoResult.style.marginTop = "20px";
+
+                        status.insertAdjacentElement("afterend", videoResult);
+
+                        while (true) {
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+
+                            const statusResponse = await fetch(
+                                "/character-swap/status/" +
+                                encodeURIComponent(generation.task_id)
+                            );
+
+                            const task = await statusResponse.json();
+
+                            if (!statusResponse.ok) {
+                                throw new Error(task.error || "Status check failed");
+                            }
+
+                            status.textContent = "AI status: " + task.status;
+
+                            if (task.status === "SUCCEEDED") {
+                                if (!task.video_url) {
+                                    throw new Error("Runway returned no video URL");
+                                }
+
+                                videoResult.src = task.video_url;
+                                status.textContent = "Your AI video is ready!";
+                                break;
+                            }
+
+                            if (task.status === "FAILED") {
+                                throw new Error(
+                                    task.error || "Character Swap generation failed"
+                                );
+                            }
+                        }
+
+                    } catch (error) {
+                        status.textContent = "Error: " + error.message;
+                    }
+
+
+
+
+                } catch (error) {
+                    status.textContent = "Error: " + error.message;
+                }
+            });
+    </script>
+</body>
+</html>
