@@ -1,313 +1,199 @@
-# 🎬 AI Video Studio
+# AI Video Studio
 
+AI Video Studio is a Python/Flask proof of concept for Runway text-to-video generation and reference-guided performer replacement in existing video. Character Swap experiments use separate command-line tools, SQLite job ledgers, offline media validation, and explicit spending authorization.
 
-## 📱 Application Preview
+This is a development prototype, not a production service or a guarantee of identity, choreography, or scene preservation. Private demonstration media is intentionally excluded from Git.
 
-https://github.com/user-attachments/assets/9a371e2a-55a0-450b-beba-9c934ba7a077
+## Current checkpoint
 
+| Component | Status |
+| --- | --- |
+| Runway text-to-video | Existing Flask generation, status, gallery, and deletion routes are implemented. This checkpoint was validated offline only. |
+| Legacy Flask Character Swap | Existing Runway upload/preparation/generation routes remain separate from Kling. Preparation and generation return HTTP 403 in demo mode. |
+| Kling 3.0 Omni demonstration | An authorized five-second, two-image performer-replacement experiment completed and was downloaded. The operator reported excellent Test 3 results. |
+| Full-video preprocessing | A source was converted from 30 fps to constant 24 fps without changing playback speed: 598 frames, 24.916667 seconds, 1920x1080. |
+| Five-segment experiment | Five inputs are prepared. Segments 01 and 02 succeeded and were downloaded. Segments 03-05 have not been submitted and have no jobs in the inspected ledger. |
+| Preview assembly | A local preview exists. A black-video stitching/playback bug is reported and remains unresolved; assembly is not a validated delivery workflow. |
+| Kling 4.0 | Separate request serialization, receipt normalization, GET-only polling, result extraction, and usage/billing reporting are tested offline. Live submission is blocked. |
+| Original-audio restoration | Local FFmpeg restoration is implemented and tested with synthetic media. No actual full-video Kling 4.0 result has been restored. |
 
-
-![AI Video Studio Interface](screenshots/app-preview.png)
-
-
-### AI-Powered Text-to-Video Generation Platform
-
-**AI Video Studio** is a full-stack web application that transforms natural-language prompts into AI-generated videos using the Runway API.
-
-Built with Python, Flask, JavaScript, HTML, CSS, and SQLite, the application provides a mobile-responsive interface for generating, viewing, downloading, and managing AI video creations.
-
-The project began as a prototype using sample videos and evolved into a working AI-powered application capable of submitting real video-generation requests, monitoring their progress, and displaying completed results.
-
-## 🚀 Project Highlights
-
-- **Real AI Video Generation:** Integrates Runway's Gen-4.5 text-to-video model to generate videos from user prompts.
-- **Asynchronous Task Monitoring:** Polls the Runway API to track video generation status.
-- **Personal Video Gallery:** Stores generation history and displays completed videos.
-- **Video Management:** Supports deleting individual gallery records.
-- **Download Functionality:** Provides a download action for generated videos.
-- **Mobile-Responsive Design:** Designed for desktop and iPhone browsers, including Home Screen access.
-- **Demo and Real AI Modes:** Allows interface testing without consuming API credits.
-- **Error Handling:** Handles API errors, failed generation tasks, and content moderation responses.
-
-## 🛠️ Technology Stack
-
-| Technology | Purpose |
-|---|---|
-| Python | Backend application logic |
-| Flask | Web framework and REST API |
-| Runway API | AI-powered video generation |
-| JavaScript | Frontend interactions and asynchronous requests |
-| HTML5 | Application structure and video playback |
-| CSS3 | Responsive interface and visual styling |
-| SQLite | Video history and metadata storage |
-| python-dotenv | Environment configuration |
-| Git & GitHub | Version control and project hosting |
-
-## 🧠 How It Works
-
-1. The user enters a natural-language video prompt.
-2. The Flask backend validates the request.
-3. The application submits the prompt to Runway's text-to-video API.
-4. Runway returns a unique generation task ID.
-5. The frontend periodically checks the task status.
-6. Once generation succeeds, the video is displayed in the built-in player.
-7. The application updates the SQLite database with the completed generation.
-8. The video becomes accessible through the My Creations gallery.
-
-**Application workflow:**
+## Architecture
 
 ```text
-User Prompt
-    |
-    v
-HTML / JavaScript Interface
-    |
-    v
-Python Flask Backend
-    |
-    v
-Runway AI API
-    |
-    v
-Generation Task Monitoring
-    |
-    v
-Generated Video
-    |
-    +----> Video Player
-    |
-    +----> SQLite Database
-    |
-    +----> My Creations Gallery
+app.py                         Flask create_app() factory and existing routes
+templates/                     Text-to-video and legacy Character Swap interfaces
+character_swap/
+  providers/base.py            Shared request, status, result, and error types
+  providers/kling.py           Legacy Kling 3.0 Omni adapter
+  providers/kling4.py          Separate 4.0 serializer and guarded provider
+  store.py                     SQLite jobs, ownership, reservations, atomic claims
+  service.py                   Authorization and provider orchestration
+  web.py                       Session-owned, read-only local job lookup
+  kling_http.py                Legacy HTTPS transport and private media downloader
+  poc_media.py                 Strict five-second media inspection
+  kling_poc*.py                Isolated Tests 1, 2, and 3
+  kling_full_video.py          Five segment jobs sharing one spending ledger
+  kling4_plan.py               Offline full-video validation and planning
+  kling4_http.py               Explicitly enabled, GET-only task transport
+  kling4_results.py            URL-free task, usage, and billing reports
+  kling4_audio.py              Verified original-audio restoration
+tests/                         Offline Flask, provider, safety, and media tests
+uploads/                       Ignored private media and experiment workspaces
 ```
 
-## ✨ Features
+Importing `app.py` does not load dotenv, initialize databases, or construct a Runway client. Calling `create_app()` initializes the application explicitly. Offline tests inject fake clients, disabled policies, and temporary database/upload paths.
 
-### 1. AI Text-to-Video Generation
+Text-to-video history uses the `videos` table. Character Swap uses a separate `character_swap_jobs` table. CLI experiments use isolated database files; all five full-video jobs share one ledger.
 
-Users can describe a scene using natural language and submit it for AI generation.
+The read-only Flask job endpoint uses signed anonymous-session ownership. Unknown, ownerless, and other-session jobs return the same 404; missing/insecure signing keys disable lookup with 503. This does not establish authentication or ownership for the older gallery and generation routes.
 
-The application integrates with Runway's Gen-4.5 model and supports vertical video generation suitable for short-form content.
+## Kling 3.0 Omni demonstration
 
-Generation duration is configured in the backend and is subject to the selected model's limits.
+The successful Test 3 uses `kling-v3-omni` in Pro mode with the original video as the base editing input. Reference image 1 supplies identity, body, hairstyle, and clothing; image 2 supplements facial identity. The prompt requests preservation of choreography, camera movement, environment, lighting, other performers, timing, and original audio.
 
-### 2. Generation Status Tracking
+Legacy settings are `refer_type="base"`, `keep_original_sound="yes"`, `sound="off"`, and `multi_shot=false`. These are not reused as Kling 4.0 settings.
 
-The application monitors generation tasks using status responses such as:
+Tests 1-3 have distinct workspaces. Test 3 can explicitly supersede an unsubmitted, unreserved plan while preserving its record and archived manifest. Reserved, attempted, and ambiguous submissions cannot be replaced this way.
 
-- `PENDING` — Waiting for processing.
-- `RUNNING` — Video generation in progress.
-- `SUCCEEDED` — Video generation completed.
-- `FAILED` — Generation unsuccessful.
+### Preprocessing and segment status
 
-The frontend updates its display based on these responses.
+The 24 fps testing copy is 16.667 milliseconds shorter than the original 30 fps source because of complete-frame rounding. Playback speed was unchanged; AAC audio was stream-copied.
 
-### 3. My Creations Gallery
+Frame-accurate cuts required lossless H.264 re-encoding because keyframes did not coincide with the requested boundaries. Decoded segment frames were compared with the testing copy: all 598 frames are covered once, in order.
 
-Generated video history is stored in SQLite, including:
+| Input | Source interval | Frames | Generation status |
+| --- | --- | --- | --- |
+| Segment 01 | 0-5 seconds | 120 | Succeeded; downloaded |
+| Segment 02 | 5-10 seconds | 120 | Succeeded; downloaded |
+| Segment 03 | 10-15 seconds | 120 | Not submitted |
+| Segment 04 | 15-20 seconds | 120 | Not submitted |
+| Segment 05 | 20-24.916667 seconds | 118 | Not submitted |
 
-- Unique task ID
-- Original text prompt
-- Video URL
-- Generation status
-- Generation mode
-- Creation timestamp
+The first two generated outputs each contain 121 frames, rather than 120. A preview retaining both outputs has 242 frames over 10.083333 seconds. Frame preservation and successful FFmpeg decoding do not prove correct browser rendering. The reported black-video stitching bug needs reproduction, codec/player compatibility checks, and visual acceptance testing. No reusable, validated stitching command is included.
 
-The gallery automatically refreshes after successful generation.
+The original continuous audio is retained locally for final assembly. Do not infer generated timing from input duration or concatenate generated audio tracks for the final soundtrack.
 
-### 4. Video Playback and Downloads
+## Installation and configuration
 
-Completed videos can be viewed directly in the application's HTML5 video player.
-
-A separate download action provides access to the generated video file, subject to browser behavior and the availability of the hosted video URL.
-
-### 5. Video Deletion
-
-Users can remove individual video records from the gallery through a dedicated Flask API endpoint.
-
-A confirmation dialog helps prevent accidental deletion.
-
-### 6. Demo Mode
-
-Demo Mode allows developers to test the application's workflow using a sample video without making paid Runway generation requests.
-
-Real AI Mode enables generation through the Runway API.
-
-## 📁 Project Structure
-
-```text
-AI_video_Studio/
-|
-|-- app.py
-|-- templates/
-|   |-- index.html
-|
-|-- .env                 # Local configuration (not committed)
-|-- .gitignore
-|-- videos.db            # Local SQLite database
-|-- .venv/               # Python virtual environment
-```
-
-## ⚙️ Local Installation
-
-### Prerequisites
-
-- Python 3.12 or a compatible Python version
-- Runway Developer account
-- Runway API key
-- API credits for real video generation
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/YOUR_USERNAME/AI-Video-Studio.git
-cd AI-Video-Studio
-```
-
-Replace `YOUR_USERNAME` with the actual GitHub account name after publishing.
-
-### 2. Create a Virtual Environment
-
-```bash
-python -m venv .venv
-```
-
-Activate it on Windows:
+The checkpoint was tested with Python 3.12.7. Python dependencies are listed in `requirements.txt` and are currently unpinned. FFmpeg and ffprobe are separate tools; install verified builds from a trusted source. The application never downloads them or changes the permanent PATH.
 
 ```powershell
-.venv\Scripts\Activate.ps1
+git clone https://github.com/LeonTolentino30/AI-Video-Studio.git
+cd AI-Video-Studio
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 3. Install Dependencies
+Configure these privately in an ignored local `.env` or server environment:
 
-```bash
-pip install Flask python-dotenv runwayml
+| Variable | Purpose |
+| --- | --- |
+| `MOCK_MODE=true` | Default demo mode. Keep enabled for local interface work. |
+| `RUNWAYML_API_SECRET` | Required by the current default startup path, even in demo mode. Never commit its value. |
+| `FLASK_SECRET_KEY` | Stable, securely generated signing key. Use at least 32 random bytes and do not regenerate each restart. |
+| `CHARACTER_SWAP_HTTPS=false` | Explicit Secure-cookie opt-out for HTTP-only local development. Use `true` for HTTPS deployments. |
+
+Never paste secrets or signed URLs into issues, command arguments, screenshots, or documentation. Kling CLIs obtain credentials through hidden terminal prompts, not `.env`; a compatible interactive terminal is required.
+
+```powershell
+.\.venv\Scripts\python.exe app.py
 ```
 
-### 4. Configure Environment Variables
+Open `http://127.0.0.1:5000`. The script binds to all interfaces (`0.0.0.0`) with debug disabled. Use it only in a trusted development environment, not as a public production server.
 
-Create a `.env` file in the project root:
+There is no global `app` object for an `app:app` entry point. Deployment tooling must use the `create_app()` factory and production configuration. Application initialization creates local directories and SQLite tables; module import does not.
 
-```env
-RUNWAYML_API_SECRET=your_runway_api_key
-MOCK_MODE=true
+### Flask routes
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/` | Text-to-video interface |
+| GET | `/config` | Demo/real mode flags |
+| POST | `/generate` | Existing Runway text-to-video generation |
+| GET | `/status/<task_id>` | Existing Runway status lookup |
+| GET | `/gallery` | Existing local gallery |
+| DELETE | `/gallery/<video_id>` | Delete a gallery record |
+| GET | `/character-swap` | Legacy Character Swap interface |
+| POST | `/character-swap/upload` | Local media upload/inspection |
+| POST | `/character-swap/prepare` | Runway preparation; blocked in demo mode |
+| POST | `/character-swap/generate` | Runway generation; blocked in demo mode |
+| GET | `/character-swap/status/<task_id>` | Legacy Runway status lookup |
+| GET | `/character-swap/jobs/<job_id>` | Owner-scoped local metadata; no provider calls |
+
+Flask does not expose the Kling CLI submission commands. Its new local job service has no registered providers and spending is disabled. That guard does not cover the separate legacy generation routes when demo mode is deliberately switched off.
+
+## Offline testing and CLI tools
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest discover -s tests
 ```
 
-Set `MOCK_MODE=false` when ready to use real Runway generation.
+At this checkpoint, **250 tests passed**, including a real offline FFmpeg restoration round trip using synthetic temporary media. That integration test skips if existing tools are unavailable. Other tests use fake transports/probes and temporary SQLite databases, without production credentials or paid requests.
 
-**Security:** Never commit API keys or the `.env` file to GitHub.
+For real local media validation, make verified tools available to the current terminal only:
 
-### 5. Start the Application
-
-```bash
-python app.py
+```powershell
+$env:PATH = "C:\path\to\verified-ffmpeg\bin;$env:PATH"
 ```
 
-Open:
+Inspect options without enabling live operations:
 
-```text
-http://127.0.0.1:5000
+```powershell
+.\.venv\Scripts\python.exe -B -m character_swap.kling_poc_test3 --help
+.\.venv\Scripts\python.exe -B -m character_swap.kling_full_video --help
+.\.venv\Scripts\python.exe -B -m character_swap.kling4_plan --help
+.\.venv\Scripts\python.exe -B -m character_swap.kling4_audio --help
 ```
 
-The application is intended for local development at this stage.
+The five-segment runner supports independent `plan`, `submit`, `poll`, and `download` commands with `--segment 01` through `05`. Planning is offline. Submission needs `--live` and the exact per-segment spending confirmation. Polling and downloading also require explicit live enabling and can make read-only network requests. Never use live commands as tests.
 
-## 🔌 REST API Endpoints
+Before a paid POST, the full-video runner verifies S3 media bytes against pinned hashes. Signed URLs and credentials remain in memory; the ledger stores hash identifiers and non-downloadable result markers. Older Tests 1-3 persist signed input URLs in their private ledgers, which must never be committed or pasted into reports.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/` | Application interface |
-| GET | `/config` | Current generation mode |
-| POST | `/generate` | Submit a video generation request |
-| GET | `/status/<task_id>` | Retrieve generation status |
-| GET | `/gallery` | Retrieve saved video history |
-| DELETE | `/gallery/<video_id>` | Delete a saved gallery record |
+The CLIs are pinned to approved media hashes and local workspaces. A fresh clone has no private assets and cannot reproduce the demonstration without separately authorized media and deliberate configuration review. Never reset a ledger, change experiment IDs, or replace hashes to bypass a failed or uncertain submission.
 
-## 🏆 Development Milestones
+## Kling 4.0 and original audio
 
-**Milestone 1 — Application Foundation**
+The separate 4.0 adapter serializes `contents` with a prompt, one `base_video`, and two ordered `refer_image` objects using custom `@id` references. Requested settings are 1080p and adaptive aspect ratio.
 
-Created the Python/Flask backend and responsive frontend interface.
+Receipts use `data.id` and `data.status`. GET-only polling uses `/tasks?task_ids=...`, matches the requested ID in the returned array, and handles `submitted`, `processing`, `succeeded`, and `failed`. Results are selected by output type. Malformed responses fail closed, and success without a valid video URL is not accepted as successful completion.
 
-**Milestone 2 — API Integration**
+Usage and billing may be absent until completion. Reports distinguish actual video duration from normalized input duration and billed output duration, preserve decimal amounts, and do not combine currencies or package units. Protected URLs never appear in normalized results/reports; they remain in memory for immediate private downloading. The documented retention period is 30 days.
 
-Connected the application to Runway's AI video generation service.
+`kling4_plan` exposes offline planning only. Live submission remains blocked pending original-audio behavior, compatible account/package access, and explicit spending authorization. A serializer and mocked polling tests are not evidence of a successful live Kling 4.0 edit.
 
-**Milestone 3 — Persistent Storage**
+`kling4_audio` restores original audio locally for a future downloaded result:
 
-Implemented SQLite storage for video generation history.
+- Copies generated video packets and verifies decoded frame hashes and timing.
+- Uses the hash-verified original soundtrack from time zero, encoded as AAC stereo at 48 kHz.
+- Checks duration, decoding, audio similarity, and unchanged input hashes.
+- Requires `--allow-tail-adjustment` approval for audio-only padding/trimming up to 0.25 seconds. Larger mismatches are rejected; playback speed never changes.
+- Publishes a separate MP4 only after verification, without overwriting inputs or an existing output.
 
-**Milestone 4 — Video Management**
+This cannot repair changed choreography, model-generated retiming, or lip-sync errors. Listening and visual review remain necessary. Atomic publication requires a filesystem supporting local hard links.
 
-Added automatic gallery updates, playback, download controls, and record deletion.
+## Security, API costs, and private artifacts
 
-**Milestone 5 — Real AI Generation**
+- All personal video, photos, results, audio, manifests, and private ledgers remain in ignored local `uploads/` workspaces. Their contents, private paths, task IDs, and signed URLs are not published here.
+- No new media or screenshots are included in this checkpoint. Publication needs separate approval of exact files, ownership/publication rights, likeness consent, and size checks. Local media is not backed up to GitHub.
+- Never commit API/AWS credentials, `.env`, virtual environments, databases/journals, logs, signed URLs, or raw provider responses. Ignore rules do not replace staged-diff review.
+- Signed S3 URLs are bearer capabilities. Refresh them privately at execution time, not through command arguments. Do not forward API Authorization headers to media downloads.
+- Spending defaults off. SQLite transactions enforce reservations and one submission claim per job. Ambiguous timeouts retain reservations and do not retry automatically. Estimates are not actual bills and do not cap provider activity outside the local ledger.
+- The five-segment workflow reserves an estimated 6 API units per segment and 30 total. Kling 4.0 planning uses a provisional 45-unit estimate for this approximately 25-second 1080p edit; submission remains disabled. Older General packages are not interchangeable with 4.0 Flagship packages. Verify current pricing, normalization, rounding, access, and balance before authorization.
+- Legacy Flask generation/gallery routes are not ready for public multi-user exposure. Anonymous job isolation is not full account authentication. Rate limits, complete media ownership enforcement, quotas, and deployment hardening remain unfinished.
 
-Successfully generated and played an original AI video using a natural-language prompt through the Runway API.
+Official references: [legacy Omni API](https://kling.ai/document-api/api/video/o1/video-omni/legacy), [4.0 Omni API](https://kling.ai/document-api/api/video/4-0/video-omni), [pricing](https://kling.ai/dev/pricing). Provider behavior and pricing can change; code safeguards do not authorize a purchase.
 
-**Milestone 6 — Error Diagnostics**
+## Roadmap
 
-Implemented visibility into Runway generation failures, including content moderation error codes.
+- Reproduce and fix black-video stitching/playback; validate in target players.
+- Review joins for identity, clothing, lighting, background, and timing discontinuities.
+- Complete Segments 03-05 only with separate authorization after quality/spending review.
+- Resolve remaining 4.0 audio/account requirements before any live full-video submission.
+- Validate original-audio restoration against a real, authorized full-video result.
+- Improve dependency reproducibility, deployment, authentication, and ownership enforcement.
 
-## 🗺️ Development Roadmap
+**Future concept, not implemented:** AI virtual try-on for clothing sellers using authorized garment images and consenting adult model references. No seller workflow, garment-fitting engine, commerce integration, customer-media pipeline, or virtual try-on API is implemented.
 
-The following features are planned and are not yet implemented:
+## License
 
-- [ ] User-selectable video duration
-- [ ] Extended video creation through clip continuation and stitching
-- [ ] Image-to-video generation
-- [ ] Video-to-video transformation
-- [ ] Character replacement and performance features
-- [ ] Improved reference-based visual consistency
-- [ ] User authentication and private galleries
-- [ ] Secure cloud deployment
-- [ ] Subscription and credit-based billing
-- [ ] API usage limits and cost controls
-- [ ] Enhanced mobile experience
-
-## 🔒 Security and Deployment
-
-AI Video Studio is currently a development prototype.
-
-Before public deployment, the application will require authentication, authorization, secure API key management, rate limiting, customer data isolation, and safeguards against unauthorized generation requests and credit consumption.
-
-The Flask development server is not intended for public production hosting.
-
-## 💡 What I Learned
-
-Building AI Video Studio provided hands-on experience with:
-
-- Full-stack web application development
-- Integrating third-party AI APIs
-- RESTful backend architecture
-- Asynchronous JavaScript and API polling
-- Database design and persistent storage
-- Environment variables and credential management
-- Error handling and API response debugging
-- Responsive interface development
-- Building and testing a functional AI-powered product
-
-This project demonstrates how modern AI services can be integrated into practical applications using traditional software engineering tools.
-
-## 🎯 Project Vision
-
-The long-term goal of AI Video Studio is to provide an accessible creative platform where users can generate, customize, and manage AI-powered video content without needing advanced video editing or programming experience.
-
-Future development will focus on greater creative control, improved video realism, character-based editing, and tools for short-form content creators.
-
-## 👨‍💻 Author
-
-**Verse**
-
-Computer Engineering Student | Python Developer | Aspiring Software Engineer
-
-Built as an independent software development project focused on artificial intelligence, full-stack engineering, and creative technology.
-
-## 📄 License
-
-No open-source license has been selected yet. All rights are reserved unless a license is added.
-
----
-
-**AI Video Studio — Turning ideas into AI-generated video.**
-
-*Powered by Runway. Runway API usage is subject to Runway's terms and content policies.*
+No open-source license has been selected. No rights to private demonstration music, videos, photographs, or likenesses are granted by this repository.

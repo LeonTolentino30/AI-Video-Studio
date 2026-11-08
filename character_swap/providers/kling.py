@@ -67,7 +67,10 @@ class KlingProvider(CharacterSwapProvider):
         """
         self._validate_url(request.video_uri)
         self._validate_url(request.reference_image_uri)
-        if not isinstance(request.prompt, str) or not isinstance(request.preserve_audio, bool):
+        if request.second_reference_image_uri is not None:
+            self._validate_url(request.second_reference_image_uri)
+        if (not isinstance(request.prompt, str) or not isinstance(request.preserve_audio, bool)
+                or not isinstance(request.complete_prompt, bool) or not request.prompt.strip() and request.complete_prompt):
             raise ProviderOperationError(ProviderError(
                 "invalid_input", "Prompt and audio preference are invalid."
             ))
@@ -83,6 +86,8 @@ class KlingProvider(CharacterSwapProvider):
         if request.prompt.strip():
             prompt += "Additional editing instructions: " + request.prompt.strip()
         prompt = prompt.strip()
+        if request.complete_prompt:
+            prompt = request.prompt
         if len(prompt) > 2500:
             raise ProviderOperationError(ProviderError(
                 "invalid_input", "The complete editing prompt must not exceed 2500 characters."
@@ -90,7 +95,9 @@ class KlingProvider(CharacterSwapProvider):
         return {
             "model_name": "kling-v3-omni",
             "prompt": prompt,
-            "image_list": [{"image_url": request.reference_image_uri}],
+            "image_list": [{"image_url": uri} for uri in (
+                [request.reference_image_uri] + ([request.second_reference_image_uri]
+                    if request.second_reference_image_uri is not None else []))],
             "video_list": [{
                 "video_url": request.video_uri,
                 "refer_type": "base",

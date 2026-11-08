@@ -59,6 +59,8 @@ class CharacterEditRequest:
     reference_image_uri: str
     prompt: str
     preserve_audio: bool = True
+    second_reference_image_uri: str | None = None
+    complete_prompt: bool = False
 
 
 @dataclass(frozen=True)

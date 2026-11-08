@@ -1,9 +1,42 @@
 
 .env
+.env.*
 .venv/
+venv/
+.aws/
+.codex/
 videos.db
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
 __pycache__/
 *.pyc
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Private user-uploaded videos and photos
 uploads/
+
+# Private media and unapproved binary artifacts, wherever they are saved.
+*.mp4
+*.mov
+*.m4a
+*.mp3
+*.wav
+*.aac
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.zip
+*.exe
+
+# Existing tracked screenshots stay tracked; do not force-add new media.
+screenshots/app-preview2.png

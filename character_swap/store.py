@@ -95,7 +95,13 @@ class JobStore:
 
     @staticmethod
     def encode_request(request: CharacterEditRequest) -> str:
-        return json.dumps(asdict(request), sort_keys=True)
+        values = asdict(request)
+        # Preserve serialized identity of existing single-image experiments.
+        if values["second_reference_image_uri"] is None:
+            values.pop("second_reference_image_uri")
+        if values["complete_prompt"] is False:
+            values.pop("complete_prompt")
+        return json.dumps(values, sort_keys=True)
 
     def get(self, job_id: str) -> Job:
         connection = sqlite3.connect(self.path)
@@ -159,6 +165,31 @@ class JobStore:
         ))
         if job.estimated_units > per_job or reserved + (job.estimated_units if adding else 0) > total:
             raise SafetyError("Character Swap spending limit exceeded")
+
+    def replace_unsubmitted_plan(self, previous_id: str, request: CharacterEditRequest) -> Job:
+        """Atomically retire an unpaid plan; never clear reservations or history.
+
+        Intended for a dedicated experiment ledger. Any other active or paid
+        record blocks replacement, including an interrupted submission.
+        """
+        encoded = self.encode_request(request)
+        with self._transaction() as connection:
+            rows = connection.execute("SELECT * FROM character_swap_jobs").fetchall()
+            previous = next((row for row in rows if row["id"] == previous_id), None)
+            if (previous is None or previous["status"] != "created"
+                    or any(row["reserved_units"] != 0 or row["provider_task_id"] is not None
+                           or row["status"] not in {"created", "superseded"}
+                           or row["id"] != previous_id and row["status"] == "created" for row in rows)):
+                raise SafetyError("Only the current unsubmitted, unreserved plan can be replaced.")
+            new_id = uuid.uuid4().hex
+            key = previous["idempotency_key"].split(":plan:")[0] + ":plan:" + uuid.uuid4().hex
+            connection.execute("UPDATE character_swap_jobs SET status = 'superseded', revision = revision + 1 WHERE id = ?", (previous_id,))
+            connection.execute("""INSERT INTO character_swap_jobs
+                (id, idempotency_key, provider, model, request_json, status, estimated_units, owner_id)
+                VALUES (?, ?, ?, ?, ?, 'created', ?, ?)""",
+                (new_id, key, previous["provider"], previous["model"], encoded,
+                 previous["estimated_units"], previous["owner_id"]))
+            return self._job(connection.execute("SELECT * FROM character_swap_jobs WHERE id = ?", (new_id,)).fetchone())
 
     def authorize(self, job_id: str, per_job: int, total: int) -> Job:
         with self._transaction() as connection:
